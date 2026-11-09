@@ -1,0 +1,44 @@
+name: Audit the Colap key directory
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: audit
+  cancel-in-progress: false
+
+env:
+  KT_URL: https://aztwfsmtwavbklxwohds.supabase.co/functions/v1/kt
+  KT_PUBLIC_KEY: mxWJz3Iim0IbNMaoNWkVpjn_TdNKEtLNKGfcUwq7GNo
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # The audit state and the published result live on the "audit" branch.
+      - name: Fetch the last audited state
+        run: |
+          if git fetch origin audit 2>/dev/null; then
+            git show origin/audit:state.json > state.json
+          fi
+      - name: Audit
+        run: deno run --allow-net --allow-env --allow-read --allow-write audit.ts state.json head.json
+      - name: Publish the audited head
+        run: |
+          mkdir out && mv state.json head.json out/
+          cd out
+          git init -q -b audit
+          git config user.name "colap-kt-audit"
+          git config user.email "colap-kt-audit@users.noreply.github.com"
+          git add state.json head.json
+          git commit -q -m "Audited up to epoch $(jq .epoch head.json)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" audit
